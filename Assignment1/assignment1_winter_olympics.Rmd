@@ -1,0 +1,118 @@
+---
+title: "Assignment 1: Using ggplot2 for visualization"
+author: Thomas Brambor
+date: 2017-02-07
+always_allow_html: yes
+output: 
+  html_document:
+    keep_md: true
+---
+
+Winter Olympics Medals over Time
+================================
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Scenario
+
+Imagine you are the data scientist at a respected media outlet -- say the "New York Times". For the Winter Olympics coverage, your editor-in-chief asks you to analyze some data on the history of `Winter Olympics Medals by Year, Country, Event and Gender` and prepare some data visualizations in which you outline the main patterns around which to base the story.
+
+Since there is **no way that all features of the data can be represented** in such a memo, feel free to pick and choose some patterns that would make for a good story -- outlining important patterns and presenting them in a visually pleasing way. 
+
+The full background and text of the story will be researched by a writer of the magazine -- your input should be based on the data and some common sense (i.e. no need to read up on this). 
+
+Provide **polished plots** that are refined enough to include in the magazine with very little further manipulation (already include variable descriptions [if necessary for understanding], titles, source [e.g. "International Olympic Committee"], right color etc.) and are understandable to the average reader of the "New York Times". The design does not need to be NYTimes-like. Just be consistent.
+
+## Data
+
+The main data is provided as an excel sheet, containing the following variables on all medal winners in all winter olympics from 1924 to 2014:
+
+  - `Year`: year of the winter olympics  
+  - `City`: city the olympics is held  
+  - `Sport`: the type of sport   
+  - `Discipline`: a grouping of disciplines  
+  - `Event`:	the particular event / competition  
+  - `Athlete`: name of the athlete  
+  - `Country`: country origin of the athlete  
+  - `Gender`: gender of the athlete  
+  - `Medal`: type of medal won
+
+For example, an `event` is a competition in a sport or discipline that gives rise to a ranking. Thus, _skiing_ is a `sport`, while _cross-country skiing, Alpine skiing, snowboarding, ski jumping_ and _Nordic combined_ are `disciplines`. _Alpine skiing_ is a `discipline`, while the _super-G, giant slalom, slalom_ and _combined_ are `events`.
+
+In addition, you are provided with some additional information about the countries in a separate spreadsheet, including the `IOC Country	Code`, `Population`, and `GDP per capita`.
+
+## Tasks
+
+#### 1. Medal Counts over Time
+
+Combine the information in the two spreadsheets `winter.csv` and `dictionary.csv`. Note, that the `dictionary.csv` is the set of current countries. You have to decide what to do with some [countries that competed under different designations in the past (e.g. Germany and Russia)](https://en.wikipedia.org/wiki/All-time_Olympic_Games_medal_table) and some defunct countries and whether and how to combine their totals.
+
+Calculate a summary of how many winter games each country competed in, and how many medals of each type the country won. Use that summary to provide a **visual comparison of medal count by country**. 
+
+Feel free to focus on smaller set of countries (say top 10), highlight the United States or another country of your choice, consider gender of the medal winners etc. to make the visualization interesting. Please provide one visualization showing an over time comparison and one in which a total medal count (across all Winter Olympics) is used. Briefly discuss which visualization you recommend to your editor and why.
+
+#### 2. Medal Counts adjusted by Population, GDP
+
+There are different ways to calculate "success". Consider the following variants and choose one (and make sure your choice is clear in the visualization):  
+  - Just consider gold medals.  
+  - Simply add up the number of medals of different types.    
+  - Create an index in which medals are valued differently. (gold=3, silver=2, bronze=1).   
+  - A reasonable other way that you prefer.
+  
+Now, adjust the ranking of medal success by (a) GDP per capita and (b) population. You have now three rankings: unadjusted ranking, adjusted by GDP per capita, and adjusted by population.
+
+Visualize how these rankings differ. Feel free to highlight a specific pattern (e.g. "Slovenia -- the hidden star of the Winter Olympics" or "The superpowers losing their grip").
+
+#### 3. Host Country Advantage
+
+Until the 2014 Winter Olympics (our data ends here), there were 19 host cities. Calculate whether the host nation had an advantage. That is calculate whether the host country did win more medals when the Winter Olympics was in their country compared to other times. 
+
+Note, that the 19 host cities are noted in the data but not that the countries they are located in. This happens commonly and often Wikipedia has the [kind of additional data you want for the task](https://en.wikipedia.org/wiki/Winter_Olympic_Games). To save you some time, here is a quick way to get this kind of table from Wikipedia into R:
+
+```{r echo=TRUE, eval=FALSE}
+library(rvest)
+library(stringr)
+wiki_hosts <- read_html("https://en.wikipedia.org/wiki/Winter_Olympic_Games")
+hosts <- html_table(html_nodes(wiki_hosts, "table")[[5]], fill=TRUE)
+hosts <- hosts[-1,1:3]
+hosts$city <- str_split_fixed(hosts$Host, n=2, ",")[,1]
+hosts$country <- str_split_fixed(hosts$Host, n=2, ",")[,2]
+```
+
+Provide a visualization of the host country advantage (or abscence thereof). 
+
+#### 4. Country success by sport / discipline / event
+
+As a last country level comparison, let's consider comparing countries' success by looking at particular sports, disciplines, and/or events. Make a choice of which kind of comparison reveals some interesting comparison here. Feel free to focus on a subset of data (say one specific sport), only look at a single country etc. 
+
+#### 5. Most successful athletes
+
+Now, let's look at the most successful athletes. Provide a visual display of the most successful athletes of all time. Consider using other information on gender, sport, discipline, event, year, and country to make the display more informative.
+
+### Interactivity
+
+#### 6. Make two plots interactive
+
+Choose 2 of the plots you created above and add interactivity. Briefly describe to the editor why interactivity in these visualization is particularly helpful for a reader.
+
+#### 7. Data Table
+
+Prepare a selected dataset and add a datatable to the output. Make sure the columns are clearly labelled. Select the appropriate options for the data table (e.g. search bar, sorting, column filters etc.). Suggest to the editor which kind of information you would like to provide in a data table and why.
+
+## Technical Details
+
+The data comes in a reasonably clean Excel dataset. If needed for your visualization, you can add visual drapery like flag icons, icons for sports, icons for medals etc. but your are certainly not obligated to do that. 
+
+Part of the your task will be transforming the dataset into a shape that allows you to plot what you want in ggplot2. For some plots, you will necessarily need to be selective in what to include and what to leave out. 
+
+Make sure to use at least three different types of graphs, e.g. line graphs, scatter, histograms, bar chats, dot plots, heat maps etc.
+
+## Submission
+
+Please follow the [instructions](/Exercises/homework_submission_instructions.md) to submit your homework. The homework is due on Monday, February 19.
+
+## Please stay honest!
+
+Yes, the medal counts of the olympics have surely been analyzed before.  If you do come across something, please no wholesale copying of other ideas. We are trying to evaluate your abilities in using ggplot2 and data visualization not the ability to do internet searches. Also, this is an individually assigned exercise -- please keep your solution to yourself.

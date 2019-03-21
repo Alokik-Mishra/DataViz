@@ -1,0 +1,410 @@
+---
+title: "Data Visualization HW3"
+author: "Alokik Mishra"
+date: "3/30/2018"
+output: 
+  html_document:
+    keep_md : true
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tm)
+library(reshape2)
+library(ggrepel)
+library(ggthemes)
+library(stringr)
+#library(qdap)
+library(qdapRegex)
+library(SnowballC)
+library(wordcloud)
+library(tidytext)
+library(plotrix)
+library(quanteda)
+knitr::opts_chunk$set(fig.path="images/",
+               cache.path="cache/",
+               cache=FALSE,
+               echo=FALSE,
+               message=FALSE,
+               warning=FALSE,
+               fig.align='center',
+               fig.width=10, 
+               fig.height=6)
+```
+
+## Question 1
+
+```{r, warning = FALSE, message = FALSE}
+Data_raw <- read_csv("kickstarter_projects.csv")
+```
+
+```{r}
+Data_working <- Data_raw %>%
+  mutate(achievement_ratio = pledged/goal,
+         category = as.factor(top_category),
+         success = (state == "successful"),
+         backers_count = backers_count/100) %>%
+  filter(state == "successful" | state == "failed", nchar(blurb) > 7) %>%
+  select(-source_url) %>% 
+  unique()
+ 
+
+Data_working$achievement_ratio[Data_working$achievement_ratio < 0.01] = 0
+Data_working$achievement_ratio[Data_working$achievement_ratio > 500] = 500
+Data_working$achievement_ratio[Data_working$achievement_ratio == Inf] = 0
+
+Success_by_cat <- Data_working %>%
+  group_by(category) %>%
+  summarise(avg_achievement_ratio = mean(achievement_ratio, na.rm = TRUE),
+            avg_backers_count = mean(backers_count),
+            avg_success = mean(success))  %>%
+  rename('Avg Achievment Ratio' = avg_achievement_ratio, 'Avg Backers Count (Hundreds)' = avg_backers_count, 'Avg Success Rate' = avg_success)
+
+Success_by_cat <- melt(Success_by_cat, id.vars = 'category')
+
+Success_by_cat$category <- str_to_title(Success_by_cat$category, locale = "en")
+
+
+ggplot(Success_by_cat, aes(x = category, y = value)) +
+    geom_bar(stat='identity', position='dodge', width = .75 )  +
+  ylab("") + xlab("Category") + 
+  theme_tufte() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  facet_wrap(~variable, scales = "free") 
+```
+
+We can see that when looking at just the success rate, the difference between most categories is not too large, with a few, such as Comics, Dance, and Theater projects being the most likely to be a success. On the other hand, we see a few clear strong performers when looking at acievement ratio and average number of backers. Both Design and Games seem to perform very wll in both the measures, whereas Comics and Technology are very strong in one of the measures, but closer to the norm in another. It might be that projects which are niche and have a target audience which is closely knit (theater and dance) might be more likely to be successful, but projects such as games and design which might have a larger more dispersed audience raise more money/backers.
+
+## Question 2
+
+### A
+
+```{r}
+rm(Success_by_cat)
+set.seed(12345)
+
+## Sampling successful and unsuccessful projects
+
+Data_success <- Data_working %>%
+  top_n(n = 1000, wt = achievement_ratio) %>%
+  dplyr::sample_n(1000, replace = FALSE) %>%
+  select(id, blurb) %>%
+  rename(doc_id = id, text = blurb) %>%
+  mutate( success = 1)
+
+Data_failed <- Data_working %>%
+  filter(state == "failed") %>%
+  dplyr::sample_n(1000, replace = FALSE) %>%
+  select(id, blurb) %>%
+  rename(doc_id = id, text = blurb) %>%
+  mutate(success = 0)
+
+Data_total <- rbind(Data_success, Data_failed)
+
+Data_total <- inner_join(Data_total, Data_working, by = c("doc_id" = "id")) %>%
+  select(doc_id, achievement_ratio, success.x, text, category)
+```
+
+
+```{r}
+
+## Defining functions
+removeNumPunct <- function(x){gsub("[^[:alpha:][:space:]]*", "", x)}
+
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(tolower))
+  corpus <- tm_map(corpus, removeWords, c(stopwords("en")))  
+  corpus <- tm_map(corpus, removeNumbers)
+  corpus <- tm_map(corpus, content_transformer(removeNumPunct))
+  corpus <- tm_map(corpus, stripWhitespace)
+  return(corpus)
+}
+
+stemCompletion2 <- function(x, dictionary) {
+  x <- unlist(strsplit(as.character(x), " "))
+  x <- x[x != ""]
+  x <- stemCompletion(x, dictionary=dictionary)
+  x <- paste(x, sep="", collapse=" ")
+  PlainTextDocument(stripWhitespace(x))
+}
+
+
+convert_tf_df <- function(df) {
+  df_source <- DataframeSource(df)
+  df_corpus <- VCorpus(df_source)
+  ## Removing All CAPS words
+  for(i in 1:1000){
+    x <- df_corpus[[i]]$content
+    vec <- unlist(strsplit(x, ' '))
+    no_caps <- vec[!grepl('^[A-Z]', vec)]
+    df_corpus[[i]]$content <- paste(no_caps, collapse=' ')
+  }
+  
+  corpus_clean <- clean_corpus(df_corpus)
+  
+  corpus_stemmed <- tm_map(corpus_clean, stemDocument)
+  
+  stem_completed <- lapply(corpus_stemmed, stemCompletion2,
+                                   dictionary = corpus_clean)
+  for(i in 1:1000){
+    stem_completed[[i]]$meta$id <- df$doc_id[i]
+  }
+  
+  stem_completed_corpus <- as.VCorpus(stem_completed)
+  
+  dtm <- DocumentTermMatrix(stem_completed_corpus)
+  dtm_tidy <- tidy(dtm)
+  
+  df_tf_idf <-  dtm_tidy %>%
+    bind_tf_idf(term, document, count) %>%  
+    arrange(desc(tf_idf)) 
+  
+  return(df_tf_idf)
+}
+
+```
+
+```{r, message = FALSE, warning = FALSE}
+set.seed(01211993)
+Success_tf_idf <- convert_tf_df(Data_success)
+wordcloud(Success_tf_idf$term, Success_tf_idf$tf, max.words = 100, colors = "red")
+```
+
+
+
+
+### B
+
+```{r}
+Fail_tf_idf <- convert_tf_df(Data_failed)
+```
+
+```{r}
+Success_tf_idf2 <- Success_tf_idf %>%
+  mutate(Success = 1) %>%
+  group_by(term) %>%
+  mutate(term_freq = sum(count)) %>%
+  ungroup(term) %>%
+  distinct(term, .keep_all = TRUE) %>%
+  rename(term_freq_success = term_freq) %>%
+  select(term, term_freq_success)
+
+
+Fail_tf_idf2 <- Fail_tf_idf %>%
+  mutate(Success = 0) %>%
+  group_by(term) %>%
+  mutate(term_freq = sum(count)) %>%
+  ungroup(term) %>%
+  distinct(term, .keep_all = TRUE) %>%
+  rename(term_freq_fail = term_freq) %>%
+  select(term, term_freq_fail)
+
+Combined <- inner_join(Fail_tf_idf2, Success_tf_idf2, by = "term") %>%
+  mutate(diff = abs(term_freq_fail - term_freq_success)) %>%
+  top_n(15, diff) %>%
+  arrange(desc(diff))
+
+pyramid.plot(Combined$term_freq_fail, Combined$term_freq_success, labels = Combined$term, 
+             gap = 10, top.labels = c("Failed", " ", "Success"), 
+             main = "Words in Common", laxlab = NULL, 
+             raxlab = NULL, unit = NULL, labelcex=0.5)
+
+
+```
+
+### C
+
+```{r}
+Blurb <- Data_total %>%
+  select(text, doc_id)
+
+Blurb_corpus <- corpus(Blurb, text_field = "text")
+
+FRE_blurb <- textstat_readability(Blurb_corpus,
+              measure=c('Flesch.Kincaid'))
+
+```
+
+
+
+```{r}
+### Has a blurb of 11111.., does not work for FK score
+
+FRE <- data_frame(FK = FRE_blurb$Flesch.Kincaid,
+    ID = Data_total$doc_id,
+    achievement = Data_total$achievement_ratio,
+    cat = Data_total$category,
+    success = Data_total$success.x) 
+
+
+```
+
+```{r}
+
+FRE2 <- FRE %>%
+  filter(FK <= 30) %>%
+  mutate(success = as.factor(success)) %>%
+  mutate(Category = cat) %>%
+  mutate(Category = stringr::str_to_title(Category))
+
+FRE2$achievement[FRE2$achievement > 100] = 100
+
+ggplot(data=FRE2, aes(x=FK,y=achievement)) + 
+  geom_point(aes(col = Category)) + 
+  guides(size=FALSE) + theme_tufte() + geom_smooth(se = FALSE, method = lm) +
+  xlab("Flesch-Kincaid Grade Level") + ylab("Achievement Rate")
+
+```
+ Based on the plot it seems as if blubr which have denser language (bsed on the FK grade level) tend to be less succesful.
+ 
+## Question 3
+ 
+ 
+### A
+ 
+```{r}
+Bing <- get_sentiments(lexicon = "bing")
+
+for(i in 1:2001){
+  x <- Data_total$text[i] 
+  x <- tokens(x)
+  y <- x$text1
+  y <- as.data.frame(y)
+  y$word <- y$y
+  joined <- inner_join(y, Bing, by = "word")
+  if (nrow(joined) > 0) {
+  joined$sent_score <- ifelse(joined$sentiment == "positive", 1, -1)
+  joined$text <- i
+  if(i == 1){
+    joined_master <- joined
+  }
+  else{
+    joined_master <- rbind(joined_master, joined)
+  }
+  }
+  else{
+  }
+  
+}
+```
+
+
+```{r}
+text <- c(seq(1:2001))
+
+Data_total2 <- Data_total %>%
+  mutate(blurb = text) %>%
+  select(-text) %>%
+  mutate(text = text)
+
+Complete <- inner_join(Data_total2, joined_master, by = "text") %>%
+  select(-y) %>%
+  group_by(doc_id) %>%
+  mutate(avg_sent_score = mean(sent_score)) %>%
+  ungroup()
+
+Complete2 <- Complete %>%
+  select(doc_id, achievement_ratio, avg_sent_score, category, blurb) %>%
+  mutate(Category = category) %>%
+  mutate(Category = stringr::str_to_title(Category)) %>%
+  unique()
+
+ggplot(data=Complete2, aes(x=avg_sent_score,y=achievement_ratio)) + 
+  geom_point(aes(col = Category)) + 
+  guides(size=FALSE) + theme_tufte() + geom_smooth(se = FALSE, method = lm) +
+  xlab("Average Sentiment") + ylab("Achievement Rate")
+
+```
+
+Surprisingly it seems as if the achievement ratio falls as the average sentiment gets more positive. This seems somewhat odd, although it is positive that blurb which appeal to compassion might have negative words (for example, describing the state of impovershed children), but still be for a good cause.
+
+### B
+
+```{r}
+Positive_only <- Complete2 %>%
+  filter(avg_sent_score >= 0) %>%
+  select(blurb)
+
+Positive_only2 <- paste(Positive_only$blurb, collapse='') 
+
+Negative_only <- Complete2 %>%
+  filter(avg_sent_score < 0) %>%
+  select(blurb)
+
+Negative_only2 <- paste(Negative_only$blurb, collapse='')
+```
+
+```{r}
+
+Type <- c("Positive", "Negative")
+Text <- c(Positive_only2, Negative_only2)
+
+Compiled <- data.frame(Type, Text)
+Compiled <- Compiled %>%
+  mutate(doc_id = Type,
+         text = Text) %>%
+  select(doc_id, text)
+
+Comp_source <- DataframeSource(Compiled)
+Comp_corpus <- VCorpus(Comp_source)
+
+Comp_corpus_clean <- clean_corpus(Comp_corpus)
+
+Comp_tdm <- TermDocumentMatrix(Comp_corpus_clean) 
+
+Comp_m <- as.matrix(Comp_tdm)
+
+comparison.cloud(Comp_m, colors = c("orange", "blue"), 
+                 scale=c(0.1,2), title.size= 1, 
+                 max.words = 100)
+```
+
+### C
+
+```{r}
+NRC <- tidytext::get_sentiments(lexicon = "nrc")
+
+
+for(i in 1:2001){
+  x <- Data_total$text[i] 
+  x <- tokens(x)
+  y <- x$text1
+  y <- as.data.frame(y)
+  y$word <- y$y
+  joined <- inner_join(y, NRC, by = "word")
+  if (nrow(joined) > 0) {
+  joined$text <- i
+  if(i == 1){
+    joined_master <- joined
+  }
+  else{
+    joined_master <- rbind(joined_master, joined)
+  }
+  }
+  else{
+  }
+  
+}
+```
+
+```{r}
+Complete3 <- inner_join(Data_total2, joined_master, by = "text") %>%
+  select(-y) %>%
+  group_by(doc_id, sentiment) %>%
+  mutate(total_sentiment = n()) %>%
+  ungroup() %>%
+  select(doc_id, achievement_ratio, sentiment, total_sentiment) %>%
+  group_by(sentiment, total_sentiment) %>%
+  mutate(achievement_by_emotion = mean(achievement_ratio, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(total_sentiment = as.numeric(total_sentiment))
+
+ggplot(Complete3, aes(x = total_sentiment, y = achievement_by_emotion)) +
+  geom_smooth(method = lm) +
+  facet_wrap( ~ sentiment) + xlab("Number of words with sentiment") + ylab("Achievement Rate")
+  
+  
+  
+```
+
+Again the result seems odd, but is does match with out earlier result in (a). We see that for emotions that we may consider positive, the achievement ratio falls as the number of those words in the blurb increase, whereas the opposite is true for emotions- that we would consider negative.
